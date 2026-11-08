@@ -3,26 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF to Word Converter (Table & Text)</title>
+  <title>BCH Price List to Word Converter</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; max-width: 550px; margin: auto; background: #f4f6f8; }
-    .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-    h2 { margin-top: 0; color: #1f2937; font-size: 20px; }
+    body { font-family: system-ui, -apple-system, sans-serif; padding: 25px; max-width: 550px; margin: auto; background: #f1f5f9; }
+    .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); }
+    h2 { margin-top: 0; color: #0f172a; font-size: 20px; }
     input[type="file"] { width: 100%; margin: 15px 0; }
-    button { background: #2563eb; color: white; border: none; padding: 12px; border-radius: 8px; width: 100%; font-size: 15px; font-weight: 600; cursor: pointer; }
-    button:disabled { background: #93c5fd; cursor: not-allowed; }
-    #status { margin-top: 15px; font-size: 14px; color: #4b5563; font-weight: 500; }
+    button { background: #0284c7; color: white; border: none; padding: 12px; border-radius: 8px; width: 100%; font-size: 15px; font-weight: 600; cursor: pointer; }
+    button:disabled { background: #bae6fd; cursor: not-allowed; }
+    #status { margin-top: 15px; font-size: 14px; color: #334155; font-weight: 500; }
   </style>
 
-  <!-- PDF.js और DOCX लाइब्रेरी -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
 </head>
 <body>
 
 <div class="card">
-  <h2>PDF to Word (Direct Table Extract)</h2>
-  <p style="font-size: 13px; color: #6b7280;">डिजिटल PDF से टेबल, हेडिंग और असली टेक्स्ट सीधे Word (.docx) में बदलें:</p>
+  <h2>PDF to Word (Color & Table Grid)</h2>
+  <p style="font-size: 13px; color: #64748b;">प्राइस लिस्ट PDF को हूबहू टेबल, बॉर्डर और रंगों के साथ Word में बदलें:</p>
   
   <input type="file" id="pdfInput" accept="application/pdf">
   <button id="convertBtn" onclick="processPDF()">Word (.docx) में बदलें</button>
@@ -39,103 +38,142 @@
     const btn = document.getElementById('convertBtn');
 
     if (!fileInput.files[0]) {
-      alert("कृपया एक PDF फ़ाइल चुनें!");
+      alert("कृपया अपनी PDF फ़ाइल चुनें!");
       return;
     }
 
     btn.disabled = true;
-    status.innerText = "PDF पढ़ी जा रही है...";
+    status.innerText = "PDF लोड हो रही है...";
 
     try {
       const file = fileInput.files[0];
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const page = await pdf.getPage(1);
+      const textContent = await page.getTextContent();
 
-      let docSections = [];
+      status.innerText = "टेबल और कॉलम पहचाने जा रहे हैं...";
 
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        status.innerText = `पेज ${pageNum} / ${pdf.numPages} का डेटा निकाला जा रहा है...`;
-        const page = await pdf.getPage(pageNum);
-        const textContent = await page.getTextContent();
+      // 1. शब्दों को Y कोऑर्डिनेट (पंक्ति / Row) के आधार पर इकट्ठा करना
+      const rowsMap = new Map();
+      const tolerance = 6; // एक ही रो के शब्दों के लिए
 
-        // आइटम्स को उनके वर्टिकल (Y) और हॉरिजॉन्टल (X) पोजीशन के हिसाब से ग्रुप करना (Row/Line Detection)
-        const linesMap = new Map();
-        const yTolerance = 5; // एक ही लाइन में थोड़ा ऊपर-नीचे होने पर भी साथ रखना
+      textContent.items.forEach(item => {
+        const str = item.str.trim();
+        if (!str) return;
 
-        textContent.items.forEach(item => {
-          const text = item.str;
-          if (!text.trim()) return;
+        const y = Math.round(item.transform[5]);
+        const x = Math.round(item.transform[4]);
 
-          const y = item.transform[5];
-          const x = item.transform[4];
-
-          let matchedY = null;
-          for (let key of linesMap.keys()) {
-            if (Math.abs(key - y) <= yTolerance) {
-              matchedY = key;
-              break;
-            }
+        let foundY = null;
+        for (let k of rowsMap.keys()) {
+          if (Math.abs(k - y) <= tolerance) {
+            foundY = k;
+            break;
           }
-
-          if (matchedY !== null) {
-            linesMap.get(matchedY).push({ x, text });
-          } else {
-            linesMap.set(y, [{ x, text }]);
-          }
-        });
-
-        // Y कोऑर्डिनेट को ऊपर से नीचे सॉर्ट करना
-        const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
-
-        let pageElements = [];
-
-        // अगर रो में कई कॉलम्स हैं, तो उन्हें वर्ड टेबल रो के रूप में जोड़ना
-        let tableRows = [];
-
-        sortedY.forEach(y => {
-          let rowItems = linesMap.get(y);
-          rowItems.sort((a, b) => a.x - b.x); // बाएं से दाएं सॉर्ट
-
-          if (rowItems.length > 2) {
-            // यह टेबल रो है
-            const cells = rowItems.map(item => new docx.TableCell({
-              children: [new docx.Paragraph({ children: [new docx.TextRun({ text: item.text, size: 18 })] })],
-              borders: {
-                top: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                bottom: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                left: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                right: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-              }
-            }));
-            tableRows.push(new docx.TableRow({ children: cells }));
-          } else {
-            // अगर पहले से टेबल रो जमा हैं तो टेबल बना दें
-            if (tableRows.length > 0) {
-              pageElements.push(new docx.Table({ rows: tableRows, width: { size: 100, type: docx.WidthType.PERCENTAGE } }));
-              tableRows = [];
-            }
-            const fullLine = rowItems.map(i => i.text).join(" ");
-            pageElements.push(new docx.Paragraph({
-              children: [new docx.TextRun({ text: fullLine, bold: fullLine.includes("Phase") || fullLine.includes("Panel"), size: 20 })],
-              spacing: { after: 100 }
-            }));
-          }
-        });
-
-        if (tableRows.length > 0) {
-          pageElements.push(new docx.Table({ rows: tableRows, width: { size: 100, type: docx.WidthType.PERCENTAGE } }));
         }
 
-        docSections.push({ children: pageElements });
-      }
+        if (foundY !== null) {
+          rowsMap.get(foundY).push({ x, str });
+        } else {
+          rowsMap.set(y, [{ x, str }]);
+        }
+      });
 
-      status.innerText = "Word फ़ाइल (.docx) तैयार हो रही है...";
+      // ऊपर से नीचे रो सॉर्ट करना
+      const sortedY = Array.from(rowsMap.keys()).sort((a, b) => b - a);
 
-      const doc = new docx.Document({ sections: docSections });
+      // 8 कॉलम की अनुमानित X सीमाएं (PDF लेआउट के आधार पर)
+      // SN | Phase | HP | Item Discription | Cat Code | MRP | Discount % | Billing Price
+      const colBounds = [0, 50, 110, 160, 370, 470, 530, 600, 1000];
+
+      const tableRows = [];
+
+      sortedY.forEach(y => {
+        let items = rowsMap.get(y);
+        items.sort((a, b) => a.x - b.x);
+
+        const rowText = items.map(i => i.str).join(" ");
+
+        // क्या यह पीला सेक्शन हेडर है? (जैसे: "Single Phase Panel...", "Three Phase...", "02-Jan-2026")
+        const isYellowHeader = rowText.includes("Panel") || rowText.includes("Starter") || rowText.includes("Jan-2026");
+        // क्या यह मुख्य कॉलम हेडर है?
+        const isBlueHeader = rowText.includes("SN") && rowText.includes("Phase");
+
+        if (isYellowHeader) {
+          // पूरी 8 कॉलम चौड़ी मर्ज जैसी रो (पीला रंग)
+          const cell = new docx.TableCell({
+            children: [new docx.Paragraph({
+              alignment: docx.AlignmentType.CENTER,
+              children: [new docx.TextRun({ text: rowText, bold: true, size: 18, font: "Calibri" })]
+            })],
+            columnSpan: 8,
+            shading: { fill: "FFFF00", type: docx.ShadingType.CLEAR }, // पीला रंग
+            borders: {
+              top: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
+              bottom: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
+              left: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
+              right: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
+            }
+          });
+          tableRows.push(new docx.TableRow({ children: [cell] }));
+        } else {
+          // 8 खानों (Cells) वाली सामान्य रो बनाना
+          let cellsData = new Array(8).fill("");
+
+          items.forEach(it => {
+            // X पोजीशन के हिसाब से कॉलम तय करना
+            for (let c = 0; c < 8; c++) {
+              if (it.x >= colBounds[c] && it.x < colBounds[c + 1]) {
+                cellsData[c] = cellsData[c] ? cellsData[c] + " " + it.str : it.str;
+                break;
+              }
+            }
+          });
+
+          const rowCells = cellsData.map((val, idx) => {
+            return new docx.TableCell({
+              children: [new docx.Paragraph({
+                alignment: (idx >= 5 || idx === 0) ? docx.AlignmentType.CENTER : docx.AlignmentType.LEFT,
+                children: [new docx.TextRun({
+                  text: val,
+                  bold: isBlueHeader,
+                  size: isBlueHeader ? 18 : 16,
+                  font: "Calibri"
+                })]
+              })],
+              shading: isBlueHeader ? { fill: "BDD7EE", type: docx.ShadingType.CLEAR } : undefined, // नीला हेडर
+              borders: {
+                top: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
+                bottom: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
+                left: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
+                right: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
+              }
+            });
+          });
+
+          tableRows.push(new docx.TableRow({ children: rowCells }));
+        }
+      });
+
+      status.innerText = "Word (.docx) फ़ाइल तैयार हो रही है...";
+
+      const docTable = new docx.Table({
+        rows: tableRows,
+        width: { size: 100, type: docx.WidthType.PERCENTAGE }
+      });
+
+      const doc = new docx.Document({
+        sections: [{
+          properties: { page: { size: { orientation: docx.PageOrientation.LANDSCAPE } } }, // लैंडस्केप ताकि 8 कॉलम अच्छे से आएं
+          children: [docTable]
+        }]
+      });
+
       const blob = await docx.Packer.toBlob(doc);
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      link.download = file.name.replace(".pdf", "") + "_table.docx";
+      link.download = file.name.replace(".pdf", "") + "_exact.docx";
       link.click();
 
       status.innerText = "सफलतापूर्वक पूरा हुआ! नई Word फ़ाइल डाउनलोड हो गई।";
