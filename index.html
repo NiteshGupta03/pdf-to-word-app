@@ -3,32 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Offline PDF to Word OCR</title>
+  <title>PDF to Word Converter (Table & Text)</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 500px; margin: auto; background: #f0f2f5; }
-    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    h2 { margin-top: 0; color: #1a1a1a; font-size: 20px; }
+    body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; max-width: 550px; margin: auto; background: #f4f6f8; }
+    .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    h2 { margin-top: 0; color: #1f2937; font-size: 20px; }
     input[type="file"] { width: 100%; margin: 15px 0; }
-    button { background: #0066cc; color: white; border: none; padding: 12px; border-radius: 8px; width: 100%; font-size: 16px; font-weight: bold; cursor: pointer; }
-    button:disabled { background: #a0c4eb; cursor: not-allowed; }
-    #status { margin-top: 15px; font-size: 14px; color: #444; word-break: break-word; }
-    textarea { width: 100%; height: 140px; margin-top: 15px; box-sizing: border-box; border-radius: 6px; border: 1px solid #ccc; padding: 8px; font-size: 13px; }
+    button { background: #2563eb; color: white; border: none; padding: 12px; border-radius: 8px; width: 100%; font-size: 15px; font-weight: 600; cursor: pointer; }
+    button:disabled { background: #93c5fd; cursor: not-allowed; }
+    #status { margin-top: 15px; font-size: 14px; color: #4b5563; font-weight: 500; }
   </style>
+
+  <!-- PDF.js और DOCX लाइब्रेरी -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
 </head>
 <body>
 
 <div class="card">
-  <h2>PDF to Word (OCR)</h2>
-  <p style="font-size: 13px; color: #666;">फाइल आपके ब्राउज़र में ही प्रोसेस होती है (100% प्राइवेट):</p>
+  <h2>PDF to Word (Direct Table Extract)</h2>
+  <p style="font-size: 13px; color: #6b7280;">डिजिटल PDF से टेबल, हेडिंग और असली टेक्स्ट सीधे Word (.docx) में बदलें:</p>
   
   <input type="file" id="pdfInput" accept="application/pdf">
   <button id="convertBtn" onclick="processPDF()">Word (.docx) में बदलें</button>
   
   <div id="status"></div>
-  <textarea id="output" placeholder="पहचाना गया टेक्स्ट यहाँ दिखेगा..." readonly></textarea>
 </div>
 
 <script>
@@ -37,62 +36,115 @@
   async function processPDF() {
     const fileInput = document.getElementById('pdfInput');
     const status = document.getElementById('status');
-    const output = document.getElementById('output');
     const btn = document.getElementById('convertBtn');
 
     if (!fileInput.files[0]) {
-      alert("कृपया PDF फाइल चुनें!");
+      alert("कृपया एक PDF फ़ाइल चुनें!");
       return;
     }
 
     btn.disabled = true;
-    output.value = "";
     status.innerText = "PDF पढ़ी जा रही है...";
 
-    const file = fileInput.files[0];
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    
-    let fullText = "";
+    try {
+      const file = fileInput.files[0];
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      status.innerText = `पेज ${pageNum} / ${pdf.numPages} का OCR स्कैन जारी है...`;
-      
-      const page = await pdf.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 1.5 });
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+      let docSections = [];
 
-      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        status.innerText = `पेज ${pageNum} / ${pdf.numPages} का डेटा निकाला जा रहा है...`;
+        const page = await pdf.getPage(pageNum);
+        const textContent = await page.getTextContent();
 
-      // हिंदी और अंग्रेजी दोनों टेक्स्ट स्कैन करने के लिए 'eng+hin' या सिर्फ 'eng'
-      const worker = await Tesseract.createWorker('eng+hin');
-      const ret = await worker.recognize(canvas);
-      fullText += `--- Page ${pageNum} ---\n` + ret.data.text + "\n\n";
-      output.value = fullText;
-      await worker.terminate();
+        // आइटम्स को उनके वर्टिकल (Y) और हॉरिजॉन्टल (X) पोजीशन के हिसाब से ग्रुप करना (Row/Line Detection)
+        const linesMap = new Map();
+        const yTolerance = 5; // एक ही लाइन में थोड़ा ऊपर-नीचे होने पर भी साथ रखना
+
+        textContent.items.forEach(item => {
+          const text = item.str;
+          if (!text.trim()) return;
+
+          const y = item.transform[5];
+          const x = item.transform[4];
+
+          let matchedY = null;
+          for (let key of linesMap.keys()) {
+            if (Math.abs(key - y) <= yTolerance) {
+              matchedY = key;
+              break;
+            }
+          }
+
+          if (matchedY !== null) {
+            linesMap.get(matchedY).push({ x, text });
+          } else {
+            linesMap.set(y, [{ x, text }]);
+          }
+        });
+
+        // Y कोऑर्डिनेट को ऊपर से नीचे सॉर्ट करना
+        const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
+
+        let pageElements = [];
+
+        // अगर रो में कई कॉलम्स हैं, तो उन्हें वर्ड टेबल रो के रूप में जोड़ना
+        let tableRows = [];
+
+        sortedY.forEach(y => {
+          let rowItems = linesMap.get(y);
+          rowItems.sort((a, b) => a.x - b.x); // बाएं से दाएं सॉर्ट
+
+          if (rowItems.length > 2) {
+            // यह टेबल रो है
+            const cells = rowItems.map(item => new docx.TableCell({
+              children: [new docx.Paragraph({ children: [new docx.TextRun({ text: item.text, size: 18 })] })],
+              borders: {
+                top: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+                bottom: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+                left: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+                right: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
+              }
+            }));
+            tableRows.push(new docx.TableRow({ children: cells }));
+          } else {
+            // अगर पहले से टेबल रो जमा हैं तो टेबल बना दें
+            if (tableRows.length > 0) {
+              pageElements.push(new docx.Table({ rows: tableRows, width: { size: 100, type: docx.WidthType.PERCENTAGE } }));
+              tableRows = [];
+            }
+            const fullLine = rowItems.map(i => i.text).join(" ");
+            pageElements.push(new docx.Paragraph({
+              children: [new docx.TextRun({ text: fullLine, bold: fullLine.includes("Phase") || fullLine.includes("Panel"), size: 20 })],
+              spacing: { after: 100 }
+            }));
+          }
+        });
+
+        if (tableRows.length > 0) {
+          pageElements.push(new docx.Table({ rows: tableRows, width: { size: 100, type: docx.WidthType.PERCENTAGE } }));
+        }
+
+        docSections.push({ children: pageElements });
+      }
+
+      status.innerText = "Word फ़ाइल (.docx) तैयार हो रही है...";
+
+      const doc = new docx.Document({ sections: docSections });
+      const blob = await docx.Packer.toBlob(doc);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = file.name.replace(".pdf", "") + "_table.docx";
+      link.click();
+
+      status.innerText = "सफलतापूर्वक पूरा हुआ! नई Word फ़ाइल डाउनलोड हो गई।";
+    } catch (err) {
+      console.error(err);
+      status.innerText = "त्रुटि: " + err.message;
+    } finally {
+      btn.disabled = false;
     }
-
-    status.innerText = "Word फाइल तैयार हो रही है...";
-
-    const doc = new docx.Document({
-      sections: [{
-        children: fullText.split('\n').map(line => new docx.Paragraph({
-          children: [new docx.TextRun(line)]
-        }))
-      }]
-    });
-
-    const blob = await docx.Packer.toBlob(doc);
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = file.name.replace(".pdf", "") + "_ocr.docx";
-    link.click();
-
-    status.innerText = "सफलतापूर्वक पूरा हुआ! Word फाइल डाउनलोड हो गई।";
-    btn.disabled = false;
   }
 </script>
 </body>
