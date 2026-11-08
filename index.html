@@ -3,215 +3,87 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Accurate PDF to Word Converter</title>
+  <title>Professional PDF to Word Converter</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; padding: 25px; max-width: 580px; margin: auto; background: #f8fafc; }
-    .card { background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); }
-    h2 { margin-top: 0; color: #0f172a; font-size: 20px; }
-    input[type="file"] { width: 100%; margin: 15px 0; }
-    button { background: #0284c7; color: white; border: none; padding: 12px; border-radius: 8px; width: 100%; font-size: 15px; font-weight: 600; cursor: pointer; }
-    button:disabled { background: #bae6fd; cursor: not-allowed; }
-    #status { margin-top: 15px; font-size: 14px; color: #334155; font-weight: 500; }
+    body { font-family: system-ui, -apple-system, sans-serif; padding: 25px; max-width: 500px; margin: 40px auto; background: #f1f5f9; }
+    .card { background: white; padding: 30px; border-radius: 14px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); text-align: center; }
+    h2 { margin-top: 0; color: #0f172a; font-size: 22px; }
+    p { font-size: 14px; color: #64748b; line-height: 1.5; }
+    .drop-zone { border: 2px dashed #cbd5e1; border-radius: 10px; padding: 25px; margin: 20px 0; background: #f8fafc; }
+    input[type="file"] { width: 100%; font-size: 14px; }
+    button { background: #0284c7; color: white; border: none; padding: 14px 20px; border-radius: 8px; width: 100%; font-size: 16px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    button:hover { background: #0369a1; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    #status { margin-top: 18px; font-size: 14px; font-weight: 500; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #0284c7; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
 </head>
 <body>
 
 <div class="card">
-  <h2>PDF to Word (Exact Text & Table)</h2>
-  <p style="font-size: 13px; color: #64748b;">PDF को बिना किसी शब्द गड़बड़ी के असली फॉन्ट और टेबल स्ट्रक्चर के साथ बदलें:</p>
+  <h2>PDF to Word (AI Engine)</h2>
+  <p>100% सटीक टेबल ग्रिड, ओरिजिनल फॉन्ट और बैकग्राउंड कलर के साथ कनवर्ट करें</p>
   
-  <input type="file" id="pdfInput" accept="application/pdf">
-  <button id="convertBtn" onclick="processPDF()">Word (.docx) में बदलें</button>
+  <div class="drop-zone">
+    <input type="file" id="pdfInput" accept="application/pdf">
+  </div>
+  
+  <button id="convertBtn" onclick="uploadAndConvert()">Word (.docx) में बदलें</button>
   
   <div id="status"></div>
 </div>
 
 <script>
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  // आपका लाइव Hugging Face Python API लिंक
+  const API_URL = "https://niteshgupta03-pdf-converter-api.hf.space/convert";
 
-  async function processPDF() {
+  async function uploadAndConvert() {
     const fileInput = document.getElementById('pdfInput');
     const status = document.getElementById('status');
     const btn = document.getElementById('convertBtn');
 
     if (!fileInput.files[0]) {
-      alert("कृपया PDF फ़ाइल चुनें!");
+      alert("कृपया एक PDF फ़ाइल चुनें!");
       return;
     }
 
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append("file", file);
+
     btn.disabled = true;
-    status.innerText = "PDF पढ़ी जा रही है...";
+    status.innerHTML = '<span class="spinner"></span> Python इंजन टेबल और फ़ॉर्मेटिंग प्रोसेस कर रहा है... (2-4 सेकंड)';
+    status.style.color = "#0284c7";
 
     try {
-      const file = fileInput.files[0];
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      let docSections = [];
+      const response = await fetch(API_URL, {
+        method: "POST",
+        body: formData
+      });
 
-      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-        status.innerText = `पेज ${pageNum} / ${pdf.numPages} का डेटा पार्स हो रहा है...`;
-        const page = await pdf.getPage(pageNum);
-        const textContent = await page.getTextContent();
-
-        // 1. टेक्स्ट आइटम्स को उनके सटीक X, Y निर्देशांकों के साथ निकालना
-        let items = [];
-        for (let item of textContent.items) {
-          const str = item.str;
-          if (!str || str.trim() === "") continue;
-
-          items.push({
-            text: str,
-            x: item.transform[4],
-            y: item.transform[5],
-            w: item.width || (str.length * 6),
-            fontSize: Math.round(Math.hypot(item.transform[0], item.transform[1])) || 10,
-            fontName: item.fontName || ""
-          });
-        }
-
-        if (items.length === 0) continue;
-
-        // 2. Y कोऑर्डिनेट के आधार पर पंक्तियाँ (Rows) बनाना
-        const rowTolerance = 4;
-        const rowsMap = new Map();
-
-        items.forEach(it => {
-          let matchedY = null;
-          for (let yKey of rowsMap.keys()) {
-            if (Math.abs(yKey - it.y) <= rowTolerance) {
-              matchedY = yKey;
-              break;
-            }
-          }
-          if (matchedY !== null) {
-            rowsMap.get(matchedY).push(it);
-          } else {
-            rowsMap.set(it.y, [it]);
-          }
-        });
-
-        // ऊपर से नीचे रो सॉर्ट करना
-        const sortedY = Array.from(rowsMap.keys()).sort((a, b) => b - a);
-
-        // 3. सभी रो में कॉलम बाउंड्रीज़ (X-positions) को ऑटो-डिटेक्ट करना
-        let allXPoints = [];
-        sortedY.forEach(y => {
-          let r = rowsMap.get(y);
-          if (r.length >= 3) {
-            r.forEach(it => allXPoints.push(it.x));
-          }
-        });
-        allXPoints.sort((a, b) => a - b);
-
-        // क्लस्टरिंग: पास-पास वाले X पॉइंट्स को एक कॉलम मानना
-        let columnStarts = [];
-        allXPoints.forEach(x => {
-          if (columnStarts.length === 0 || (x - columnStarts[columnStarts.length - 1] > 25)) {
-            columnStarts.push(x);
-          }
-        });
-
-        const totalCols = columnStarts.length > 1 ? columnStarts.length : 1;
-        let tableRows = [];
-        let pageElements = [];
-
-        sortedY.forEach(y => {
-          let rowItems = rowsMap.get(y);
-          rowItems.sort((a, b) => a.x - b.x);
-
-          const fullRowText = rowItems.map(i => i.text).join(" ").trim();
-          const isBannerHeader = rowItems.length <= 2 && totalCols > 3 && (fullRowText.length > 15 || fullRowText.includes("Panel") || fullRowText.includes("202"));
-
-          if (isBannerHeader) {
-            // पीला/हाईलाइट सब-हेडर जो पूरे टेबल में फैला होता है
-            const cell = new docx.TableCell({
-              children: [new docx.Paragraph({
-                alignment: docx.AlignmentType.CENTER,
-                children: [new docx.TextRun({ text: fullRowText, bold: true, size: 18, font: "Calibri" })]
-              })],
-              columnSpan: totalCols,
-              shading: { fill: "FFFF00", type: docx.ShadingType.CLEAR },
-              borders: {
-                top: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
-                bottom: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
-                left: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
-                right: { style: docx.BorderStyle.SINGLE, size: 1, color: "000000" },
-              }
-            });
-            tableRows.push(new docx.TableRow({ children: [cell] }));
-          } else if (totalCols > 1) {
-            // ऑटो-कॉलम रो
-            let colCells = new Array(totalCols).fill("");
-
-            rowItems.forEach(it => {
-              // यह आइटम किस कॉलम में आता है?
-              let colIdx = 0;
-              for (let c = 0; c < totalCols; c++) {
-                if (c === totalCols - 1 || it.x < columnStarts[c + 1] - 8) {
-                  colIdx = c;
-                  break;
-                }
-              }
-              colCells[colIdx] = colCells[colIdx] ? colCells[colIdx] + " " + it.text : it.text;
-            });
-
-            const isHeaderRow = fullRowText.includes("SN") || fullRowText.includes("Discription") || fullRowText.includes("MRP");
-
-            const cells = colCells.map(val => new docx.TableCell({
-              children: [new docx.Paragraph({
-                children: [new docx.TextRun({
-                  text: val.trim(),
-                  bold: isHeaderRow,
-                  size: 16,
-                  font: "Calibri"
-                })]
-              })],
-              shading: isHeaderRow ? { fill: "BDD7EE", type: docx.ShadingType.CLEAR } : undefined,
-              borders: {
-                top: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                bottom: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                left: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-                right: { style: docx.BorderStyle.SINGLE, size: 1, color: "CCCCCC" },
-              }
-            }));
-
-            tableRows.push(new docx.TableRow({ children: cells }));
-          } else {
-            pageElements.push(new docx.Paragraph({
-              children: [new docx.TextRun({ text: fullRowText, size: 18 })],
-              spacing: { after: 100 }
-            }));
-          }
-        });
-
-        if (tableRows.length > 0) {
-          pageElements.push(new docx.Table({
-            rows: tableRows,
-            width: { size: 100, type: docx.WidthType.PERCENTAGE }
-          }));
-        }
-
-        docSections.push({
-          properties: { page: { size: { orientation: docx.PageOrientation.LANDSCAPE } } },
-          children: pageElements
-        });
+      if (!response.ok) {
+        throw new Error("सर्वर से कनेक्ट नहीं हो सका (Status: " + response.status + ")");
       }
 
-      status.innerText = "Word फ़ाइल (.docx) तैयार हो रही है...";
-      const doc = new docx.Document({ sections: docSections });
-      const blob = await docx.Packer.toBlob(doc);
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = file.name.replace(".pdf", "") + "_exact.docx";
-      link.click();
+      status.innerText = "फ़ाइल तैयार है, डाउनलोड हो रही है...";
+      status.style.color = "#16a34a";
 
-      status.innerText = "सफलतापूर्वक पूरा हुआ! Word फ़ाइल डाउनलोड हो गई।";
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = file.name.replace(/\.[^/.]+$/, "") + "_converted.docx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+
+      status.innerText = "सफलतापूर्वक पूरा हुआ! Word (.docx) डाउनलोड हो गई।";
     } catch (err) {
       console.error(err);
       status.innerText = "त्रुटि: " + err.message;
+      status.style.color = "#dc2626";
     } finally {
       btn.disabled = false;
     }
